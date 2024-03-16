@@ -18,3 +18,5 @@ chromadb
 tiktoken
 pypdf
 sentence-transformers
+pymupdf
+operator
