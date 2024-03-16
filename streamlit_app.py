@@ -22,7 +22,7 @@ from operator import itemgetter
 #     return embeddings
 
 # load the document
-documents, parent_splitter, child_splitter = process_pdf_document('/Users/misanmeggison/Downloads/DepressionGuide-web.pdf')
+documents, parent_splitter, child_splitter = process_pdf_document('rag/ipynb_files/DepressionGuide-web.pdf')
 
 # Create the vectorstore
 vectorstore, store = create_vectorstore()
