@@ -14,8 +14,10 @@ pyspellchecker
 openpyxl
 transformers
 langchain
+langchain-community
 chromadb
 tiktoken
 pypdf
 sentence-transformers
 pymupdf
+python-dotenv

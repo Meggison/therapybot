@@ -1,258 +1,163 @@
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import os
+from dotenv import load_dotenv
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.retrievers import ParentDocumentRetriever
 from langchain.storage import InMemoryStore
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyMuPDFLoader
-import os
-from langchain.prompts.chat import ChatPromptTemplate
 from langchain.memory import ConversationBufferMemory
-from rag.generator import load_llm
-from langchain.prompts import PromptTemplate
-from rag.retriever import process_pdf_document, create_vectorstore, rag_retriever
-from langchain.schema import format_document
-from langchain_core.messages import AIMessage, HumanMessage, get_buffer_string
-from langchain_core.runnables import RunnableParallel
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from operator import itemgetter
-
-# Function to create embeddings
-# def create_embeddings(text_chunks):
-#     embeddings = embeddings_model.encode(text_chunks, show_progress_bar=True)
-#     return embeddings
-
-# load the document
-documents, parent_splitter, child_splitter = process_pdf_document('rag/ipynb_files/DepressionGuide-web.pdf')
-
-# Create the vectorstore
-vectorstore, store = create_vectorstore()
-
-# Create the retriever
-retriever = rag_retriever(vectorstore, store, documents, parent_splitter, child_splitter)
-
-# Load the LLM model
-llm = load_llm()
-
-
-# get user message prompts
-def get_prompts(prompt_dir='/Users/misanmeggison/HyderabadIndiaChapter_MentalHealthWellbeingFomoSocialMedia/src/prompts', system_file_path='system_prompt_template.txt', condense_file_path='condense_question_prompt_template.txt'):
-
-    with open(os.path.join(prompt_dir, system_file_path), 'r') as f:
-        system_prompt_template = f.read()
-
-    # with open(os.path.join(prompt_dir, 'user_prompt_template.txt'), 'r') as f:
-    #     user_message = f.read()
-
-    with open(os.path.join(prompt_dir, condense_file_path), 'r') as f:
-        condense_question_prompt = f.read()  
-
-    # create message templates
-    ANSWER_PROMPT = ChatPromptTemplate.from_template(system_prompt_template)
-
-    # create message templates
-    CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(condense_question_prompt)
-
-    return ANSWER_PROMPT, CONDENSE_QUESTION_PROMPT
-
-# get the prompts
-ANSWER_PROMPT, CONDENSE_QUESTION_PROMPT = get_prompts()
-
-# Instantiate ConversationBufferMemory
-memory = ConversationBufferMemory(
- return_messages=True, output_key="answer", input_key="question"
-)
-
-DEFAULT_DOCUMENT_PROMPT = PromptTemplate.from_template(template="{page_content}")
-
-def _combine_documents(
-    docs, document_prompt=DEFAULT_DOCUMENT_PROMPT, document_separator="\n\n"
-):
-    doc_strings = [format_document(doc, document_prompt) for doc in docs]
-
-    return document_separator.join(doc_strings)
-
-
-# First we add a step to load memory
-# This adds a "memory" key to the input object
-loaded_memory = RunnablePassthrough.assign(
-    chat_history=RunnableLambda(memory.load_memory_variables) | itemgetter("history"),
-)
-# Now we calculate the standalone question
-standalone_question = {
-    "standalone_question": {
-        "question": lambda x: x["question"],
-        "chat_history": lambda x: get_buffer_string(x["chat_history"]),
-    }
-    | CONDENSE_QUESTION_PROMPT
-    | llm,
-}
-# Now we retrieve the documents
-retrieved_documents = {
-    "docs": itemgetter("standalone_question") | retriever,
-    "question": lambda x: x["standalone_question"],
-}
-# Now we construct the inputs for the final prompt
-final_inputs = {
-    "context": lambda x: _combine_documents(x["docs"]),
-    "question": itemgetter("question"),
-}
-# And finally, we do the part that returns the answers
-answer = {
-    "answer": final_inputs | ANSWER_PROMPT | llm,
-    "docs": itemgetter("docs"),
-}
-# And now we put it all together!
-final_chain = loaded_memory | standalone_question | retrieved_documents | answer
-
-
-def call_conversational_rag(question, chain, memory):
-    """
-    Calls a conversational RAG (Retrieval-Augmented Generation) model to generate an answer to a given question.
-
-    This function sends a question to the RAG model, retrieves the answer, and stores the question-answer pair in memory 
-    for context in future interactions.
-
-    Parameters:
-    question (str): The question to be answered by the RAG model.
-    chain (LangChain object): An instance of LangChain which encapsulates the RAG model and its functionality.
-    memory (Memory object): An object used for storing the context of the conversation.
-
-    Returns:
-    dict: A dictionary containing the generated answer from the RAG model.
-    """
-    
-    # Prepare the input for the RAG model
-    inputs = {"question": question}
-
-    # Invoke the RAG model to get an answer
-    result = chain.invoke(inputs)
-    
-    # Save the current question and its answer to memory for future context
-    memory.save_context(inputs, {"answer": result["answer"]})
-    
-    # Return the result
-    return result
-
-
-
+from rag.generator import load_llm, guardrails
 import streamlit as st
 from streamlit_chat import message
 from streamlit_extras.colored_header import colored_header
 from streamlit_extras.add_vertical_space import add_vertical_space
-from hugchat import hugchat
 
-st.set_page_config(page_title="HugChat - An LLM-powered Streamlit app")
+# Load environment variables
+load_dotenv()
+
+# Initialize session state
+if 'generated' not in st.session_state:
+    st.session_state['generated'] = ["I'm TherapyBot, a mental health assistant. How may I help you today?"]
+if 'past' not in st.session_state:
+    st.session_state['past'] = ['Hi!']
+if 'memory' not in st.session_state:
+    st.session_state['memory'] = ConversationBufferMemory(
+        return_messages=True, output_key="answer", input_key="question"
+    )
+if 'embeddings' not in st.session_state:
+    st.session_state['embeddings'] = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-mpnet-base-v2"
+    )
+if 'llm' not in st.session_state:
+    try:
+        st.session_state['llm'] = load_llm()
+    except ValueError as e:
+        st.error(str(e))
+        st.stop()
+
+# Set page config
+st.set_page_config(
+    page_title="TherapyBot - Mental Health Assistant",
+    page_icon="🤖",
+    layout="wide"
+)
 
 # Sidebar contents
 with st.sidebar:
-    st.title('🤗💬 HugChat App')
+    st.title('🤖 TherapyBot')
     st.markdown('''
     ## About
-    This app is an LLM-powered chatbot built using:
-    - [Streamlit](https://streamlit.io/)
-    - [HugChat](https://github.com/Soulter/hugging-chat-api)
-    - [OpenAssistant/oasst-sft-6-llama-30b-xor](https://huggingface.co/OpenAssistant/oasst-sft-6-llama-30b-xor) LLM model
+    TherapyBot is an AI-powered mental health assistant built using:
+    - Streamlit
+    - LangChain
+    - HuggingFace Models
+    - RAG Technology
     
-    💡 Note: No API key required!
+    ⚠️ **Disclaimer**: This is not a replacement for professional mental health care.
+    If you're experiencing a mental health emergency, please contact emergency services
+    or a mental health crisis hotline immediately.
+    
+    **Emergency Resources:**
+    - National Crisis Hotline: 988
+    - Crisis Text Line: Text HOME to 741741
     ''')
     add_vertical_space(5)
-    st.write('Made with ❤️ by [Data Professor](https://youtube.com/dataprofessor)')
 
-# Generate empty lists for generated and past.
-## generated stores AI generated responses
-if 'generated' not in st.session_state:
-    st.session_state['generated'] = ["I'm HugChat, How may I help you?"]
-## past stores User's questions
-if 'past' not in st.session_state:
-    st.session_state['past'] = ['Hi!']
-
-# Layout of input/response containers
-input_container = st.container()
-colored_header(label='', description='', color_name='blue-30')
-response_container = st.container()
-
-# User input
-## Function for taking user provided prompt as input
-def get_text():
-    input_text = st.text_input("You: ", "", key="input")
-    return input_text
-## Applying the user input box
-with input_container:
-    user_input = get_text()
-
-# Response output
-## Function for taking user prompt as input followed by producing AI generated responses
-def generate_response(prompt):
-    chatbot = hugchat.ChatBot()
-    response = chatbot.chat(prompt)
-    return response
-
-## Conditional display of AI generated responses as a function of user provided prompts
-with response_container:
-    if user_input:
-        response = generate_response(user_input)
-        st.session_state.past.append(user_input)
-        st.session_state.generated.append(response)
+# Load the document
+@st.cache_resource
+def process_pdf_document(pdf_path):
+    """Process the PDF document and return necessary components for RAG"""
+    if not os.path.exists(pdf_path):
+        st.error(f"Error: Document not found at {pdf_path}")
+        st.info("Please place your mental health guide PDF in the data/documents directory.")
+        return None, None, None
         
-    if st.session_state['generated']:
-        for i in range(len(st.session_state['generated'])):
-            message(st.session_state['past'][i], is_user=True, key=str(i) + '_user')
-            message(st.session_state["generated"][i], key=str(i))
-
-
-import streamlit as st
-from streamlit_chat import message
-from streamlit_extras.colored_header import colored_header
-from streamlit_extras.add_vertical_space import add_vertical_space
-from hugchat import hugchat
-
-st.set_page_config(page_title="HugChat - An LLM-powered Streamlit app")
-
-# Sidebar contents
-with st.sidebar:
-    st.title('🤗💬 HugChat App')
-    st.markdown('''
-    ## About
-    This app is an LLM-powered chatbot built using:
-    - [Streamlit](https://streamlit.io/)
-    - [HugChat](https://github.com/Soulter/hugging-chat-api)
-    - [OpenAssistant/oasst-sft-6-llama-30b-xor](https://huggingface.co/OpenAssistant/oasst-sft-6-llama-30b-xor) LLM model
+    loader = PyMuPDFLoader(pdf_path)
+    documents = loader.load()
     
-    💡 Note: No API key required!
-    ''')
-    add_vertical_space(5)
-    st.write('Made with ❤️ by [Data Professor](https://youtube.com/dataprofessor)')
+    parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000)
+    child_splitter = RecursiveCharacterTextSplitter(chunk_size=400)
+    
+    return documents, parent_splitter, child_splitter
 
-# Generate empty lists for generated and past.
-## generated stores AI generated responses
-if 'generated' not in st.session_state:
-    st.session_state['generated'] = ["I'm HugChat, How may I help you?"]
-## past stores User's questions
-if 'past' not in st.session_state:
-    st.session_state['past'] = ['Hi!']
+@st.cache_resource
+def create_vectorstore(_embeddings):
+    """Create and return the vector store components"""
+    vectorstore = Chroma(embedding_function=_embeddings)
+    store = InMemoryStore()
+    return vectorstore, store
 
-# Layout of input/response containers
+@st.cache_resource
+def initialize_rag():
+    """Initialize RAG components with caching"""
+    documents, parent_splitter, child_splitter = process_pdf_document('data/documents/mental_health_guide.pdf')
+    if not documents:
+        return None
+        
+    vectorstore, store = create_vectorstore(st.session_state['embeddings'])
+    retriever = ParentDocumentRetriever(
+        vectorstore=vectorstore,
+        docstore=store,
+        child_splitter=child_splitter,
+        parent_splitter=parent_splitter,
+    )
+    retriever.add_documents(documents)
+    return retriever
+
+# Initialize RAG components
+try:
+    retriever = initialize_rag()
+except Exception as e:
+    st.error(f"Error initializing RAG system: {str(e)}")
+    retriever = None
+
+# Setup chat interface
+st.title("💭 Chat with TherapyBot")
+st.write("I'm here to provide information and support about mental health topics. Remember, I'm not a replacement for professional help.")
+
 input_container = st.container()
-colored_header(label='', description='', color_name='blue-30')
+colored_header(label='Chat History', description='', color_name='blue-30')
 response_container = st.container()
 
 # User input
-## Function for taking user provided prompt as input
 def get_text():
-    input_text = st.text_input("You: ", "", key="input")
+    input_text = st.text_input(
+        "Your message:",
+        "",
+        key="input",
+        placeholder="Type your message here...",
+        label_visibility="collapsed"
+    )
     return input_text
-## Applying the user input box
+
+# Response generation
+@st.cache_data(show_spinner=False)
+def generate_response(user_input):
+    if not guardrails(user_input):
+        return "I apologize, but I cannot assist with content related to self-harm or harm to others. Please seek professional help if you're having such thoughts. Here are some resources:\n\n" + \
+               "- National Crisis Hotline: 988\n" + \
+               "- Crisis Text Line: Text HOME to 741741"
+    
+    try:
+        # Use RAG for response generation
+        if retriever:
+            context_docs = retriever.get_relevant_documents(user_input)
+            context = "\n".join([doc.page_content for doc in context_docs])
+        else:
+            context = ""
+        
+        response = st.session_state['llm'].predict(
+            f"Context: {context}\n\nUser: {user_input}\n\nAssistant: Let me help you with that. Remember to be empathetic and supportive while providing accurate information based on the context. "
+        )
+        return response
+    except Exception as e:
+        return f"I apologize, but I encountered an error. Please try again or rephrase your question. Error: {str(e)}"
+
+# Main chat interface
 with input_container:
     user_input = get_text()
 
-# Response output
-## Function for taking user prompt as input followed by producing AI generated responses
-def generate_response(prompt):
-    chatbot = hugchat.ChatBot()
-    response = call_conversational_rag(prompt, final_chain, memory)
-    return response['answer']
-
-## Conditional display of AI generated responses as a function of user provided prompts
 with response_container:
     if user_input:
         response = generate_response(user_input)
