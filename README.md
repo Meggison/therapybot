@@ -1,25 +1,70 @@
-# 📦 Streamlit App Starter Kit 
+# TherapyBot 🤖💭
+
+A mental health-focused chatbot powered by advanced language models and RAG (Retrieval-Augmented Generation) technology. This application provides therapeutic conversations while leveraging evidence-based mental health resources.
+
+## Features
+
+- 🧠 Conversational AI with mental health expertise
+- 📚 RAG-based responses using verified mental health documentation
+- 💬 Interactive chat interface built with Streamlit
+- 🔄 Conversation memory for contextual responses
+- 📑 Document processing with PDF support
+
+## Technical Architecture
+
+- **Frontend**: Streamlit-based interactive web interface
+- **Language Model**: Integration with HuggingFace models
+- **RAG System**: Custom implementation using:
+  - Document processing (PyMuPDF)
+  - Vector storage (Chroma)
+  - Embedding generation (HuggingFace)
+  - Memory management (LangChain)
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/Meggison/therapybot.git
+cd therapybot
 ```
-⬆️ (Replace above with your app's name)
+
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
 ```
 
-Description of the app ...
+## Usage
 
-## Demo App
+Run the Streamlit application:
+```bash
+streamlit run streamlit_app.py
+```
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://app-starter-kit.streamlit.app/)
+The application will be available at `http://localhost:8501` by default.
 
-## GitHub Codespaces
+## Project Structure
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/streamlit/app-starter-kit?quickstart=1)
+- `streamlit_app.py`: Main application file with UI and chat logic
+- `rag/`: RAG implementation components
+  - `generator.py`: LLM loading and response generation
+  - `retriever.py`: Document processing and retrieval logic
+- `model/`: Model-related configurations
+- `preprocessing/`: Text preprocessing utilities
+- `prompts/`: System and user prompt templates
 
-## Section Heading
+## Dependencies
 
-This is filler text, please replace this with text for this section.
+Key dependencies include:
+- Streamlit and extensions for UI
+- LangChain for RAG implementation
+- HuggingFace libraries for embeddings and models
+- ChromaDB for vector storage
+- PyMuPDF for PDF processing
 
-## Further Reading
+## Contributing
 
-This is filler text, please replace this with a explanatory text about further relevant resources for this repo
-- Resource 1
-- Resource 2
-- Resource 3
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is open source and available under the MIT License.
